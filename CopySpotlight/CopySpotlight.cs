@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.ServiceProcess;
@@ -9,9 +11,17 @@ using System.Timers;
 
 namespace CopySpotlight
 {
+    public static class FileExtensions
+    {
+        public static Task DeleteAsync(this FileInfo fi)
+        {
+            return Task.Factory.StartNew(() => fi.Delete());
+        }
+    }
+
     public partial class CopySpotlight : ServiceBase
     {
-        private Timer _timer;
+        private static Timer _timer;
 
         public CopySpotlight()
         {
@@ -37,6 +47,8 @@ namespace CopySpotlight
 
             // react on shutdown and start in windows fast start mode
             this.CanHandlePowerEvent = true;
+
+            eventLog1.WriteEntry("New CopySpotlight object created.");
         }
 
         protected override void OnStart(string[] args)
@@ -54,6 +66,9 @@ namespace CopySpotlight
 
         private async void DoCopySpotlight()
         {
+            // collects log information
+            List<string> log = new List<string>();
+
             // find target folder
             string userPicturesFolderPath = Environment.ExpandEnvironmentVariables(
                 "%UserProfile%\\Pictures\\");
@@ -61,6 +76,7 @@ namespace CopySpotlight
             if (Directory.Exists(userPicturesFolderPath))
             {
                 picturesFolderPath = userPicturesFolderPath;
+                log.Add("Using local user picture folder (not onedrive).");
             }
             else
             {
@@ -69,68 +85,118 @@ namespace CopySpotlight
                 if (Directory.Exists(onedrivePicturesFolderPath))
                 {
                     picturesFolderPath = onedrivePicturesFolderPath;
+                    log.Add("Using OneDrive picture folder.");
                 }
             }
             if (string.IsNullOrEmpty(picturesFolderPath))
             {
-                eventLog1.WriteEntry("No target Picture folder found.", EventLogEntryType.Warning);
+                eventLog1.WriteEntry("No target Picture folder found.\n" 
+                    + string.Join("\n", log) , EventLogEntryType.Warning);
                 return;
             }
             picturesFolderPath += "CopySpotlight\\";
+            log.Add($"The used pictures folder path is: {picturesFolderPath}");
             Directory.CreateDirectory(picturesFolderPath);
 
             // get files
             string spotlightFolderPath = Environment.ExpandEnvironmentVariables(
                 "%LocalAppData%\\Packages\\"
                 + "Microsoft.Windows.ContentDeliveryManager_cw5n1h2txyewy\\LocalState\\Assets\\");
+            log.Add("I check for new files...");
             string[] files = Directory.GetFiles(spotlightFolderPath);
             if (!files.Any())
             {
-                eventLog1.WriteEntry("No Spotlight files found.", EventLogEntryType.Warning);
+                eventLog1.WriteEntry("No Spotlight files found.\n" 
+                    + string.Join("\n", log), EventLogEntryType.Warning);
                 return;
             }
+            log.Add($"{files.Length} files were found in path {spotlightFolderPath}");
 
             // copy files
+            log.Add("I start main process to copy the new files to the target locations.");
             bool hasNewFiles = false;
             bool teamsUpdate = false;
             try
             {
                 foreach (string file in files)
                 {
+                    log.Add("\n" + $"I start investigation of file {file}.");
+
                     #region copy all new files ----------------------------------------------------
 
                     string[] filePathParts = file.Split("\\".ToCharArray());
                     string fileName = filePathParts.Last();
                     string jpgFile = picturesFolderPath + fileName + ".jpg";
+                    log.Add($"I use the filename '{jpgFile}' in target locations.");
 
                     // continue with next file if file still exists
                     if (File.Exists(jpgFile))
                     {
+                        log.Add($"The file '{jpgFile}' still exists. I continue with next file.");
+                        continue;
+                    }
+
+                    // skip if not larger than 200 KB
+                    long minFilesizeToCopy = 200 * 1000;
+                    FileInfo infoSpotlightFile = new FileInfo(file);
+                    if (infoSpotlightFile.Length < minFilesizeToCopy)                    
+                    {
+                        log.Add($"The file {file} is not larger than "
+                            + $"{minFilesizeToCopy / 1000} KB. I will skip it.");
                         continue;
                     }
 
                     // copy all new file to jpg file in target folder
                     // await it, because it could not be read otherwise in next code block
                     // from now on jpgFile exists at target location
+                    log.Add($"Start copiing file '{file}' to '{jpgFile}'...");
                     await CopyFileAsync(file, jpgFile);
                     hasNewFiles = true;
+                    log.Add($"Copiing file '{file}' to '{jpgFile}' has been finished.");
 
-                    // parse to Image object
-                    Image jpgImage = Image.FromFile(jpgFile);
-                    if (jpgImage == null)
+                    // read image details
+                    log.Add($"Reading file information of file '{jpgFile}'...");
+                    bool isHdLandscape = false;
+                    bool isHdPortrait = false;
+                    bool isJpgImage = false;
+                    try
                     {
-                        // assure image
-                        continue;
+                        FileInfo info = new FileInfo(jpgFile);
+                        using (Image jpgImage = Image.FromFile(jpgFile))
+                        {
+                            log.Add("Image object has been created.");                            
+                            if (jpgImage != null && info.Length >= minFilesizeToCopy)
+                            {
+                                isJpgImage
+                                    = jpgImage.RawFormat.Equals(ImageFormat.Jpeg)
+                                    && jpgImage.Width > 0
+                                    && jpgImage.Height > 0;
+
+                                if (isJpgImage)
+                                {
+                                    isHdLandscape = jpgImage.Width == 1920 && jpgImage.Height == 1080;
+                                    isHdPortrait = jpgImage.Width == 1080 && jpgImage.Height == 1920;
+                                }
+
+                                jpgImage.Dispose(); // unlock file
+                            }
+                        }
+                        log.Add($"It {(isJpgImage ? "is" : "is not")} an image.");
+                        log.Add($"It {(isHdLandscape ? "is" : "is not")} a HD-Landscape image.");
+                        log.Add($"It {(isHdPortrait ? "is" : "is not")} a HD-Portrait image.");
+
+                        // continue with next image if not an HD image                    
+                        if (!isHdLandscape && !isHdPortrait)
+                        {
+                            log.Add("Deleting the copied file; it is not a HD image.");
+                            await info.DeleteAsync();
+                            log.Add("Continue with next file.");
+                            continue;
+                        }
                     }
-
-                    // continue with next image if not an HD image
-                    bool isHdLandscape = jpgImage.Width == 1920 && jpgImage.Height == 1080;
-                    bool isHdPortrait = jpgImage.Width == 1080 && jpgImage.Height == 1920;
-                    jpgImage.Dispose(); // unlock file
-                    if (!isHdLandscape && !isHdPortrait)
+                    catch (Exception exc)
                     {
-                        File.Delete(jpgFile);
-                        continue;
+                        log.Add($"An exception occured: {exc.Message}");
                     }
 
                     #endregion
@@ -229,7 +295,8 @@ namespace CopySpotlight
             }
             catch (Exception exc)
             {
-                eventLog1.WriteEntry(exc.Message, EventLogEntryType.Error);
+                eventLog1.WriteEntry($"An error occured: {exc.Message} \n"
+                    + string.Join("\n", log), EventLogEntryType.Error);
             }
 
             // log info
@@ -240,10 +307,11 @@ namespace CopySpotlight
                 ? $"Background image in Teams has been added/updated."
                 : "Background image in Teams has not been added/updated.";
             eventLog1.WriteEntry(
-                result + "\n\r" 
-                + teams + "\n\r"
-                + "Spotlight folder path: " + spotlightFolderPath + "\n\r"
-                + "Target Picture folder path: " + picturesFolderPath);
+                result + "\n" 
+                + teams + "\n"
+                + "Spotlight folder path: " + spotlightFolderPath + "\n"
+                + "Target Picture folder path: " + picturesFolderPath + "\n\n"
+                + string.Join("\n", log));
         }
 
         protected override void OnContinue()
