@@ -92,6 +92,7 @@ namespace CopySpotlight
 
             // copy files
             bool hasNewFiles = false;
+            bool teamsUpdate = false;
             try
             {
                 foreach (string file in files)
@@ -164,19 +165,27 @@ namespace CopySpotlight
 
                     #region update background image to use in MS Teams ----------------------------
 
-                    // skip if not landscape
-                    if (!isHdLandscape)
+                    // skip if not landscape or Teams path is not found
+                    string teamsFolderPath = Environment.ExpandEnvironmentVariables(
+                        "%appdata%\\Microsoft\\Teams\\");
+                    if (!isHdLandscape || !Directory.Exists(teamsFolderPath))
                     {
                         continue;
                     }
 
                     // Teams path and files
-                    string teamsBackgroundFolderPath = Environment.ExpandEnvironmentVariables(
+                    string teamsBackgroundsFolderPath = Environment.ExpandEnvironmentVariables(
+                        "%appdata%\\Microsoft\\Teams\\Backgrounds\\");
+                    string teamsUploadsFolderPath = Environment.ExpandEnvironmentVariables(
                         "%appdata%\\Microsoft\\Teams\\Backgrounds\\Uploads\\");
                     string latestBackgroundTeamsFile 
-                        = teamsBackgroundFolderPath + "latest-landscape.jpg";
+                        = teamsUploadsFolderPath + "latest-landscape.jpg";
                     string latestBackgroundTeamsThumbFile
-                        = teamsBackgroundFolderPath + "latest-landscape_thumb.jpg";
+                        = teamsUploadsFolderPath + "latest-landscape_thumb.jpg";
+
+                    // assure folders
+                    Directory.CreateDirectory(teamsBackgroundsFolderPath);
+                    Directory.CreateDirectory(teamsUploadsFolderPath);
 
                     // create files if not existing
                     if (!File.Exists(latestBackgroundTeamsFile))
@@ -192,6 +201,8 @@ namespace CopySpotlight
                         }
                         Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158));
                         thumbImage.Save(latestBackgroundTeamsThumbFile);
+
+                        teamsUpdate = true;
                     }
 
                     // if a target file exists, overwrite it if newer
@@ -209,6 +220,8 @@ namespace CopySpotlight
                         }
                         Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158));
                         thumbImage.Save(latestBackgroundTeamsThumbFile);
+
+                        teamsUpdate = true;
                     }
 
                     #endregion
@@ -223,7 +236,12 @@ namespace CopySpotlight
             string result = hasNewFiles
                 ? "New files were found and copied to target location."
                 : "No new files found to copy.";
-            eventLog1.WriteEntry(result + "\n\r"
+            string teams = teamsUpdate
+                ? $"Background image in Teams has been added/updated."
+                : "Background image in Teams has not been added/updated.";
+            eventLog1.WriteEntry(
+                result + "\n\r" 
+                + teams + "\n\r"
                 + "Spotlight folder path: " + spotlightFolderPath + "\n\r"
                 + "Target Picture folder path: " + picturesFolderPath);
         }
