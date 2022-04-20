@@ -284,21 +284,26 @@ namespace CopySpotlight
                                 $"been created.");
 
                             // create thumbnail img
-                            Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile);
-                            if (File.Exists(latestBackgroundTeamsThumbFile))
+                            using (Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile))
                             {
-                                File.Delete(latestBackgroundTeamsThumbFile);
-                                log.Add($"I have deleted the existing file " +
-                                    $"{latestBackgroundTeamsThumbFile} before creating a new " +
-                                    $"version of that file.");
-                            }
-                            Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158));
-                            thumbImage.Save(latestBackgroundTeamsThumbFile);
-                            log.Add($"A new thumbnail image {latestBackgroundTeamsThumbFile} " +
-                                $"has been created.");
+                                if (File.Exists(latestBackgroundTeamsThumbFile))
+                                {
+                                    File.Delete(latestBackgroundTeamsThumbFile);
+                                    log.Add($"I have deleted the existing file " +
+                                        $"{latestBackgroundTeamsThumbFile} before creating a new " +
+                                        $"version of that file.");
+                                }
 
-                            // raise flag
-                            teamsUpdate = true;
+                                using (Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158)))
+                                {
+                                    thumbImage.Save(latestBackgroundTeamsThumbFile);
+                                    log.Add($"A new thumbnail image {latestBackgroundTeamsThumbFile} " +
+                                        $"has been created.");
+
+                                    // raise flag
+                                    teamsUpdate = true;
+                                }
+                            }
                         }
 
                         // if a target file exists, overwrite it if newer
@@ -307,17 +312,26 @@ namespace CopySpotlight
                         {
                             //File.Copy(jpgFile, latestTarget, true);
                             await CopyFileAsync(jpgFile, latestBackgroundTeamsFile);
+                            log.Add($"The file {latestBackgroundTeamsFile} exist and has " +
+                                $"been updated.");
 
                             // update thumbnail img
-                            Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile);
-                            if (File.Exists(latestBackgroundTeamsThumbFile))
+                            using (Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile))
                             {
-                                File.Delete(latestBackgroundTeamsThumbFile);
+                                if (File.Exists(latestBackgroundTeamsThumbFile))
+                                {
+                                    File.Delete(latestBackgroundTeamsThumbFile);
+                                    log.Add($"The previous thumbnail image {latestBackgroundTeamsThumbFile} " +
+                                        $"has been deleted.");
+                                }
+                                using (Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158)))
+                                {
+                                    thumbImage.Save(latestBackgroundTeamsThumbFile);
+                                    log.Add($"A new thumbnail image {latestBackgroundTeamsThumbFile} " +
+                                        $"has been created.");
+                                }
+                                teamsUpdate = true;
                             }
-                            Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158));
-                            thumbImage.Save(latestBackgroundTeamsThumbFile);
-
-                            teamsUpdate = true;
                         }
                     }
                     catch (Exception exc)
