@@ -11,14 +11,6 @@ using System.Timers;
 
 namespace CopySpotlight
 {
-    public static class FileExtensions
-    {
-        public static Task DeleteAsync(this FileInfo fi)
-        {
-            return Task.Factory.StartNew(() => fi.Delete());
-        }
-    }
-
     public partial class CopySpotlight : ServiceBase
     {
         private static Timer _timer;
@@ -409,6 +401,14 @@ namespace CopySpotlight
                     await source.CopyToAsync(destination);
                 }
             }
+        }
+    }
+
+    public static class FileExtensions
+    {
+        public static Task DeleteAsync(this FileInfo fi)
+        {
+            return Task.Factory.StartNew(() => fi.Delete());
         }
     }
 }
