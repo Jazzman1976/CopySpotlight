@@ -11,14 +11,6 @@ using System.Timers;
 
 namespace CopySpotlight
 {
-    public static class FileExtensions
-    {
-        public static Task DeleteAsync(this FileInfo fi)
-        {
-            return Task.Factory.StartNew(() => fi.Delete());
-        }
-    }
-
     public partial class CopySpotlight : ServiceBase
     {
         private static Timer _timer;
@@ -90,8 +82,8 @@ namespace CopySpotlight
             }
             if (string.IsNullOrEmpty(picturesFolderPath))
             {
-                eventLog1.WriteEntry("No target Picture folder found.\n" 
-                    + string.Join("\n", log) , EventLogEntryType.Warning);
+                eventLog1.WriteEntry("No target Picture folder found.\n"
+                    + string.Join("\n", log), EventLogEntryType.Warning);
                 return;
             }
             picturesFolderPath += "CopySpotlight\\";
@@ -106,7 +98,7 @@ namespace CopySpotlight
             string[] files = Directory.GetFiles(spotlightFolderPath);
             if (!files.Any())
             {
-                eventLog1.WriteEntry("No Spotlight files found.\n" 
+                eventLog1.WriteEntry("No Spotlight files found.\n"
                     + string.Join("\n", log), EventLogEntryType.Warning);
                 return;
             }
@@ -139,7 +131,7 @@ namespace CopySpotlight
                     // skip if not larger than 200 KB
                     long minFilesizeToCopy = 200 * 1000;
                     FileInfo infoSpotlightFile = new FileInfo(file);
-                    if (infoSpotlightFile.Length < minFilesizeToCopy)                    
+                    if (infoSpotlightFile.Length < minFilesizeToCopy)
                     {
                         log.Add($"The file {file} is not larger than "
                             + $"{minFilesizeToCopy / 1000} KB. I will skip it.");
@@ -164,7 +156,7 @@ namespace CopySpotlight
                         FileInfo info = new FileInfo(jpgFile);
                         using (Image jpgImage = Image.FromFile(jpgFile))
                         {
-                            log.Add("Image object has been created.");                            
+                            log.Add("Image object has been created.");
                             if (jpgImage != null && info.Length >= minFilesizeToCopy)
                             {
                                 isJpgImage
@@ -185,7 +177,7 @@ namespace CopySpotlight
                         log.Add($"It {(isHdLandscape ? "is" : "is not")} a HD-Landscape image.");
                         log.Add($"It {(isHdPortrait ? "is" : "is not")} a HD-Portrait image.");
 
-                        // continue with next image if not an HD image                    
+                        // continue with next image if not an HD image 
                         if (!isHdLandscape && !isHdPortrait)
                         {
                             log.Add("Deleting the copied file; it is not a HD image.");
@@ -204,26 +196,37 @@ namespace CopySpotlight
 
                     #region update latest landscape or portrait -----------------------------------
 
-                    // check if landscape or portrait
-                    string latestJpgFileLandscape = picturesFolderPath + "latest-landscape.jpg";
-                    string latestJpgFilePortrait = picturesFolderPath + "latest-portrait.jpg";
-                    string latestTarget = isHdLandscape
-                        ? latestJpgFileLandscape
-                        : latestJpgFilePortrait;
-                    
-                    // if no target file exists create it and continue with next image
-                    if (!File.Exists(latestTarget))
+                    try
                     {
-                        // await it, because it could not be read otherwise in next code block
-                        await CopyFileAsync(jpgFile, latestTarget);
-                    }
+                        // check if landscape or portrait
+                        string latestJpgFileLandscape = picturesFolderPath + "latest-landscape.jpg";
+                        string latestJpgFilePortrait = picturesFolderPath + "latest-portrait.jpg";
+                        string latestTarget = isHdLandscape
+                            ? latestJpgFileLandscape
+                            : latestJpgFilePortrait;
 
-                    // if a target file exists, overwrite it if newer
-                    else if (File.GetCreationTime(latestTarget).Ticks
-                        <= File.GetCreationTime(jpgFile).Ticks)
+                        // if no target file exists create it and continue with next image
+                        if (!File.Exists(latestTarget))
+                        {
+                            // await it, because it could not be read otherwise in next code block
+                            await CopyFileAsync(jpgFile, latestTarget);
+                            log.Add($"The file {latestTarget} didn't exist and has been created.");
+                        }
+
+                        // if a target file exists, overwrite it if newer
+                        else if (File.GetCreationTime(latestTarget).Ticks
+                            <= File.GetCreationTime(jpgFile).Ticks)
+                        {
+                            //File.Copy(jpgFile, latestTarget, true);
+                            await CopyFileAsync(jpgFile, latestTarget);
+                            log.Add($"The exising file {latestTarget} has been updated.");
+                        }
+                    }
+                    catch (Exception exc)
                     {
-                        //File.Copy(jpgFile, latestTarget, true);
-                        await CopyFileAsync(jpgFile, latestTarget);
+                        log.Add("An error occured while working on the latest image in picture " +
+                            $"folder. I continue with next image.\nException: {exc.Message}");
+                        continue;
                     }
 
                     #endregion
@@ -231,63 +234,104 @@ namespace CopySpotlight
 
                     #region update background image to use in MS Teams ----------------------------
 
-                    // skip if not landscape or Teams path is not found
-                    string teamsFolderPath = Environment.ExpandEnvironmentVariables(
-                        "%appdata%\\Microsoft\\Teams\\");
-                    if (!isHdLandscape || !Directory.Exists(teamsFolderPath))
+                    try
                     {
+                        // skip if not landscape or Teams path is not found
+                        string teamsFolderPath = Environment.ExpandEnvironmentVariables(
+                            "%appdata%\\Microsoft\\Teams\\");
+                        if (!isHdLandscape || !Directory.Exists(teamsFolderPath))
+                        {
+                            if (!isHdLandscape)
+                            {
+                                log.Add("The image is not relevant as Teams background.");
+                            }
+                            else
+                            {
+                                log.Add("Can't find MS Teams installation.");
+                            }
+                            log.Add("I will continue with the next image.");
+                            continue;
+                        }
+
+                        // Teams path and files
+                        string teamsBackgroundsFolderPath = Environment.ExpandEnvironmentVariables(
+                            "%appdata%\\Microsoft\\Teams\\Backgrounds\\");
+                        string teamsUploadsFolderPath = Environment.ExpandEnvironmentVariables(
+                            "%appdata%\\Microsoft\\Teams\\Backgrounds\\Uploads\\");
+                        string latestBackgroundTeamsFile
+                            = teamsUploadsFolderPath + "latest-landscape.jpg";
+                        string latestBackgroundTeamsThumbFile
+                            = teamsUploadsFolderPath + "latest-landscape_thumb.jpg";
+
+                        // assure folders
+                        Directory.CreateDirectory(teamsBackgroundsFolderPath);
+                        Directory.CreateDirectory(teamsUploadsFolderPath);
+
+                        // create files if not existing
+                        if (!File.Exists(latestBackgroundTeamsFile))
+                        {
+                            // await it, because it could not be read otherwise in next code block
+                            await CopyFileAsync(jpgFile, latestBackgroundTeamsFile);
+                            log.Add($"The file {latestBackgroundTeamsFile} didn't exist and has " +
+                                $"been created.");
+
+                            // create thumbnail img
+                            using (Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile))
+                            {
+                                if (File.Exists(latestBackgroundTeamsThumbFile))
+                                {
+                                    File.Delete(latestBackgroundTeamsThumbFile);
+                                    log.Add($"I have deleted the existing file " +
+                                        $"{latestBackgroundTeamsThumbFile} before creating a new " +
+                                        $"version of that file.");
+                                }
+
+                                using (Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158)))
+                                {
+                                    thumbImage.Save(latestBackgroundTeamsThumbFile);
+                                    log.Add($"A new thumbnail image {latestBackgroundTeamsThumbFile} " +
+                                        $"has been created.");
+
+                                    // raise flag
+                                    teamsUpdate = true;
+                                }
+                            }
+                        }
+
+                        // if a target file exists, overwrite it if newer
+                        else if (File.GetCreationTime(latestBackgroundTeamsFile).Ticks
+                            <= File.GetCreationTime(jpgFile).Ticks)
+                        {
+                            //File.Copy(jpgFile, latestTarget, true);
+                            await CopyFileAsync(jpgFile, latestBackgroundTeamsFile);
+                            log.Add($"The file {latestBackgroundTeamsFile} exist and has " +
+                                $"been updated.");
+
+                            // update thumbnail img
+                            using (Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile))
+                            {
+                                if (File.Exists(latestBackgroundTeamsThumbFile))
+                                {
+                                    File.Delete(latestBackgroundTeamsThumbFile);
+                                    log.Add($"The previous thumbnail image {latestBackgroundTeamsThumbFile} " +
+                                        $"has been deleted.");
+                                }
+                                using (Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158)))
+                                {
+                                    thumbImage.Save(latestBackgroundTeamsThumbFile);
+                                    log.Add($"A new thumbnail image {latestBackgroundTeamsThumbFile} " +
+                                        $"has been created.");
+                                }
+                                teamsUpdate = true;
+                            }
+                        }
+                    }
+                    catch (Exception exc)
+                    {
+                        log.Add($"An error occured while working on MS Teams background image. " +
+                            $"I will skip it and continue with the next image.\n" +
+                            $"Error: {exc.Message}");
                         continue;
-                    }
-
-                    // Teams path and files
-                    string teamsBackgroundsFolderPath = Environment.ExpandEnvironmentVariables(
-                        "%appdata%\\Microsoft\\Teams\\Backgrounds\\");
-                    string teamsUploadsFolderPath = Environment.ExpandEnvironmentVariables(
-                        "%appdata%\\Microsoft\\Teams\\Backgrounds\\Uploads\\");
-                    string latestBackgroundTeamsFile 
-                        = teamsUploadsFolderPath + "latest-landscape.jpg";
-                    string latestBackgroundTeamsThumbFile
-                        = teamsUploadsFolderPath + "latest-landscape_thumb.jpg";
-
-                    // assure folders
-                    Directory.CreateDirectory(teamsBackgroundsFolderPath);
-                    Directory.CreateDirectory(teamsUploadsFolderPath);
-
-                    // create files if not existing
-                    if (!File.Exists(latestBackgroundTeamsFile))
-                    {
-                        // await it, because it could not be read otherwise in next code block
-                        await CopyFileAsync(jpgFile, latestBackgroundTeamsFile);
-
-                        // create thumbnail img
-                        Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile);
-                        if (File.Exists(latestBackgroundTeamsThumbFile))
-                        {
-                            File.Delete(latestBackgroundTeamsThumbFile);
-                        }
-                        Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158));
-                        thumbImage.Save(latestBackgroundTeamsThumbFile);
-
-                        teamsUpdate = true;
-                    }
-
-                    // if a target file exists, overwrite it if newer
-                    else if (File.GetCreationTime(latestBackgroundTeamsFile).Ticks
-                        <= File.GetCreationTime(jpgFile).Ticks)
-                    {
-                        //File.Copy(jpgFile, latestTarget, true);
-                        await CopyFileAsync(jpgFile, latestBackgroundTeamsFile);
-
-                        // update thumbnail img
-                        Image latestBackgroundImage = Image.FromFile(latestBackgroundTeamsFile);
-                        if (File.Exists(latestBackgroundTeamsThumbFile))
-                        {
-                            File.Delete(latestBackgroundTeamsThumbFile);
-                        }
-                        Image thumbImage = new Bitmap(latestBackgroundImage, new Size(280, 158));
-                        thumbImage.Save(latestBackgroundTeamsThumbFile);
-
-                        teamsUpdate = true;
                     }
 
                     #endregion
@@ -307,7 +351,7 @@ namespace CopySpotlight
                 ? $"Background image in Teams has been added/updated."
                 : "Background image in Teams has not been added/updated.";
             eventLog1.WriteEntry(
-                result + "\n" 
+                result + "\n"
                 + teams + "\n"
                 + "Spotlight folder path: " + spotlightFolderPath + "\n"
                 + "Target Picture folder path: " + picturesFolderPath + "\n\n"
@@ -357,6 +401,14 @@ namespace CopySpotlight
                     await source.CopyToAsync(destination);
                 }
             }
+        }
+    }
+
+    public static class FileExtensions
+    {
+        public static Task DeleteAsync(this FileInfo fi)
+        {
+            return Task.Factory.StartNew(() => fi.Delete());
         }
     }
 }
