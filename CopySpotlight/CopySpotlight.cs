@@ -252,16 +252,52 @@ namespace CopySpotlight
                             log.Add("I will continue with the next image.");
                             continue;
                         }
+                        
+                        // get config for filename from 'config.json' in assembly executing directory
+                        string filename = "latest-landscape";
+                        string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                        string assemblyDirectory = Path.GetDirectoryName(assemblyPath);
+                        if (assemblyDirectory != null)
+                        {
+                            string configFilePath = Path.Combine(assemblyDirectory, "config.json");
+                            if (File.Exists(configFilePath))
+                            {
+                                string jsonContent = File.ReadAllText(configFilePath);
+                                dynamic config = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonContent);
+                                if (config != null && config.filename != null)
+                                {
+                                    filename = config.filename;
+                                    log.Add($"Filename for Teams background image is set to '{filename}' " +
+                                        $"from config.json.");
+                                }
+                                else
+                                {
+                                    log.Add("Config file 'config.json' is missing or invalid. " +
+                                        "Using default filename 'latest-landscape'.");
+                                }
+                            }
+                            else
+                            {
+                                log.Add("Config file 'config.json' not found. " +
+                                    "Using default filename 'latest-landscape'.");
+                            }
+                        }
+                        else
+                        {
+                            log.Add("Can't find executing assembly directory.");
+                        }
 
                         // Teams path and files
                         string teamsBackgroundsFolderPath = Environment.ExpandEnvironmentVariables(
-                            "%appdata%\\Microsoft\\Teams\\Backgrounds\\");
+                            //"%appdata%\\Microsoft\\Teams\\Backgrounds\\");
+                            "%localappdata%\\Packages\\MSTeams_8wekyb3d8bbwe\\LocalCache\\Microsoft\\MSTeams\\Backgrounds\\");
                         string teamsUploadsFolderPath = Environment.ExpandEnvironmentVariables(
-                            "%appdata%\\Microsoft\\Teams\\Backgrounds\\Uploads\\");
+                            //"%appdata%\\Microsoft\\Teams\\Backgrounds\\Uploads\\");
+                            "%localappdata%\\Packages\\MSTeams_8wekyb3d8bbwe\\LocalCache\\Microsoft\\MSTeams\\Backgrounds\\Uploads\\");
                         string latestBackgroundTeamsFile
-                            = teamsUploadsFolderPath + "latest-landscape.jpg";
+                            = teamsUploadsFolderPath + filename + ".jpeg"; //"latest-landscape.jpg";
                         string latestBackgroundTeamsThumbFile
-                            = teamsUploadsFolderPath + "latest-landscape_thumb.jpg";
+                            = teamsUploadsFolderPath + filename + "_thumb.jpeg"; // "latest-landscape_thumb.jpg";
 
                         // assure folders
                         Directory.CreateDirectory(teamsBackgroundsFolderPath);
